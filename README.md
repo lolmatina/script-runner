@@ -56,9 +56,11 @@
 ### 📦 **Intelligent Package Management**
 - **Automatic dependency detection** - scans scripts for required packages
 - **Auto-install option** - automatically install missing packages during execution
+- **Smart package substitution** - automatically replaces problematic packages (e.g., `psycopg2` → `psycopg2-binary`)
 - **Version specifier support** (e.g., `pandas>=1.0`, `numpy==2.0`)
 - **Manual requirements** - admins can specify additional packages
 - **Installation feedback** - real-time package installation status and warnings
+- **Helpful error messages** - clear guidance when installation fails
 
 ### 🎨 **Enhanced User Interface**
 - **Modern Bootstrap 5 design** with responsive layout and dark/light themes
@@ -788,6 +790,29 @@ MAX_EXECUTIONS_PER_HOUR=20
    3. Clear pip cache: pip cache purge
    4. Install manually: pip install package_name
    5. Check package name spelling
+```
+
+#### **"PostgreSQL/psycopg2 installation error"**
+```bash
+❌ Problem: "pg_config executable not found" when installing psycopg2
+✅ Solutions:
+   • System automatically uses 'psycopg2-binary' instead
+   • Manual fix: pip install psycopg2-binary
+   • Alternative: Install PostgreSQL development headers:
+     - Windows: Install PostgreSQL with dev tools
+     - Ubuntu/Debian: sudo apt-get install libpq-dev
+     - macOS: brew install postgresql
+```
+
+#### **"MySQL/mysqlclient installation error"**
+```bash
+❌ Problem: "mysql_config not found" when installing mysqlclient
+✅ Solutions:
+   • System automatically uses 'PyMySQL' instead
+   • Manual fix: pip install PyMySQL
+   • Alternative: Install MySQL development headers:
+     - Ubuntu/Debian: sudo apt-get install libmysqlclient-dev
+     - macOS: brew install mysql
 ```
 
 #### **"Module not found" After Installation**

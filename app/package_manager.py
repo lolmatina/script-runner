@@ -18,6 +18,33 @@ class PackageManager:
             'base64', 'hashlib', 'hmac', 'secrets', 'getpass', 'platform',
             'traceback', 'warnings', 'inspect', 'gc', 'weakref', 'copy', 'pprint'
         }
+        
+        # Package substitutions for common problematic packages
+        self.package_substitutions = {
+            'psycopg2': 'psycopg2-binary',  # PostgreSQL adapter - use binary version
+            'mysqlclient': 'PyMySQL',       # MySQL client - use pure Python alternative
+            'pycrypto': 'pycryptodome',     # Crypto library - use maintained fork
+            'PIL': 'Pillow',                # Python Imaging Library - use Pillow
+        }
+        
+        # Common installation fixes and alternatives
+        self.installation_fixes = {
+            'psycopg2': {
+                'alternative': 'psycopg2-binary',
+                'reason': 'PostgreSQL headers required for compilation',
+                'solution': 'Using pre-compiled binary version instead'
+            },
+            'mysqlclient': {
+                'alternative': 'PyMySQL',
+                'reason': 'MySQL headers required for compilation',
+                'solution': 'Using pure Python MySQL connector instead'
+            },
+            'pycrypto': {
+                'alternative': 'pycryptodome',
+                'reason': 'Package is deprecated and unmaintained',
+                'solution': 'Using actively maintained fork instead'
+            }
+        }
     
     def get_installed_packages(self) -> Set[str]:
         """Get list of installed packages"""
@@ -71,6 +98,35 @@ class PackageManager:
             print(f"Error analyzing script imports: {e}")
             return set()
     
+    def substitute_problematic_packages(self, packages: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Substitute problematic packages with working alternatives
+        Returns: (substituted_packages, substitution_messages)
+        """
+        substituted = []
+        messages = []
+        
+        for pkg in packages:
+            # Extract package name (remove version specifiers)
+            clean_pkg = re.split(r'[><=!]', pkg)[0].strip()
+            version_spec = pkg[len(clean_pkg):].strip() if len(pkg) > len(clean_pkg) else ''
+            
+            if clean_pkg.lower() in self.package_substitutions:
+                original = clean_pkg
+                alternative = self.package_substitutions[clean_pkg.lower()]
+                substituted_pkg = alternative + version_spec
+                substituted.append(substituted_pkg)
+                
+                if clean_pkg.lower() in self.installation_fixes:
+                    fix_info = self.installation_fixes[clean_pkg.lower()]
+                    messages.append(f"📦 Substituting '{original}' with '{alternative}': {fix_info['solution']}")
+                else:
+                    messages.append(f"📦 Substituting '{original}' with '{alternative}'")
+            else:
+                substituted.append(pkg)
+        
+        return substituted, messages
+    
     def check_missing_packages(self, required_packages: List[str]) -> Tuple[List[str], List[str]]:
         """
         Check which packages are missing
@@ -89,7 +145,15 @@ class PackageManager:
             # Handle package names with version specifiers (e.g., 'requests>=2.0')
             clean_pkg = re.split(r'[><=!]', pkg)[0].strip()
             
-            if clean_pkg in installed:
+            # Check if the package or its alternative is installed
+            is_installed = clean_pkg in installed
+            
+            # Also check if an alternative is installed (e.g., psycopg2-binary for psycopg2)
+            if not is_installed and clean_pkg in self.package_substitutions:
+                alternative = self.package_substitutions[clean_pkg].lower()
+                is_installed = alternative in installed
+            
+            if is_installed:
                 available.append(clean_pkg)
             else:
                 missing.append(pkg)  # Keep original format for installation
@@ -98,15 +162,18 @@ class PackageManager:
     
     def install_packages(self, packages: List[str]) -> Tuple[bool, str]:
         """
-        Install missing packages using pip
+        Install missing packages using pip with intelligent substitutions
         Returns: (success, message)
         """
         if not packages:
             return True, "No packages to install"
         
+        # Apply package substitutions
+        substituted_packages, substitution_messages = self.substitute_problematic_packages(packages)
+        
         try:
             # Install packages
-            cmd = [sys.executable, '-m', 'pip', 'install'] + packages
+            cmd = [sys.executable, '-m', 'pip', 'install'] + substituted_packages
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -114,21 +181,80 @@ class PackageManager:
                 timeout=300  # 5 minutes timeout
             )
             
+            success_msg = ""
+            if substitution_messages:
+                success_msg += "\n".join(substitution_messages) + "\n"
+            
             if result.returncode == 0:
-                return True, f"✅ Successfully installed: {', '.join(packages)}"
+                success_msg += f"✅ Successfully installed: {', '.join(substituted_packages)}"
+                return True, success_msg
             else:
-                return False, f"❌ Installation failed: {result.stderr}"
+                # Try to provide helpful error messages
+                error_msg = result.stderr
+                helpful_msg = self.get_helpful_error_message(error_msg, packages)
+                return False, f"❌ Installation failed: {helpful_msg}"
                 
         except subprocess.TimeoutExpired:
             return False, "❌ Installation timed out (5 minutes)"
         except Exception as e:
             return False, f"❌ Installation error: {str(e)}"
     
+    def get_helpful_error_message(self, error_output: str, original_packages: List[str]) -> str:
+        """Generate helpful error messages based on common installation failures"""
+        
+        # Check for specific error patterns
+        if "pg_config executable not found" in error_output:
+            return (
+                "PostgreSQL development headers not found. "
+                "Try installing 'psycopg2-binary' instead of 'psycopg2', "
+                "or install PostgreSQL development packages on your system."
+            )
+        
+        if "Microsoft Visual C++" in error_output:
+            return (
+                "Microsoft Visual C++ compiler required. "
+                "Install Visual Studio Build Tools or try binary packages instead."
+            )
+        
+        if "mysql_config not found" in error_output:
+            return (
+                "MySQL development headers not found. "
+                "Try installing 'PyMySQL' instead of 'mysqlclient', "
+                "or install MySQL development packages."
+            )
+        
+        if "No module named '_ctypes'" in error_output:
+            return (
+                "Python was compiled without ctypes support. "
+                "Please reinstall Python with ctypes support."
+            )
+        
+        if "error: subprocess-exited-with-error" in error_output:
+            # Check if any packages have known alternatives
+            suggestions = []
+            for pkg in original_packages:
+                clean_pkg = re.split(r'[><=!]', pkg)[0].strip().lower()
+                if clean_pkg in self.installation_fixes:
+                    fix_info = self.installation_fixes[clean_pkg]
+                    suggestions.append(f"Try '{fix_info['alternative']}' instead of '{clean_pkg}'")
+            
+            if suggestions:
+                return f"Build failed. Suggestions: {'; '.join(suggestions)}"
+        
+        # Return a truncated version of the original error
+        lines = error_output.split('\n')
+        if len(lines) > 10:
+            return f"{' '.join(lines[:5])}... (truncated)"
+        else:
+            return error_output
+    
     def get_package_install_command(self, packages: List[str]) -> str:
-        """Get the pip install command for manual installation"""
+        """Get the pip install command for manual installation with substitutions"""
         if not packages:
             return ""
-        return f"pip install {' '.join(packages)}"
+        
+        substituted_packages, _ = self.substitute_problematic_packages(packages)
+        return f"pip install {' '.join(substituted_packages)}"
     
     def analyze_script_dependencies(self, script_path: str, declared_requirements: str = None) -> Dict:
         """
@@ -146,11 +272,16 @@ class PackageManager:
         all_requirements = list(detected_imports) + declared
         installed, missing = self.check_missing_packages(all_requirements)
         
+        # Get substitution info for missing packages
+        substituted_missing, substitution_messages = self.substitute_problematic_packages(missing)
+        
         return {
             'detected_imports': sorted(detected_imports),
             'declared_requirements': declared,
             'installed_packages': sorted(installed),
             'missing_packages': sorted(missing),
+            'substituted_packages': sorted(substituted_missing),
+            'substitution_messages': substitution_messages,
             'install_command': self.get_package_install_command(missing) if missing else None,
             'all_requirements': sorted(set(all_requirements))
         }

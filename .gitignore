@@ -8,3 +8,12 @@ __pycache__
 *.pyz
 *.pywz
 *.pyzw
+script_outputs/
+app.db
+*.db
+*.db-journal
+*.db-lock
+*.db-trace
+*.db-wal
+*.db-shm
+*.db-wal
