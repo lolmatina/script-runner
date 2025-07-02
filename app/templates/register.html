@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Register - Script Runner App{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6 col-lg-4">
+        <div class="card">
+            <div class="card-body p-5">
+                <div class="text-center mb-4">
+                    <i class="fas fa-user-plus fa-3x text-success mb-3"></i>
+                    <h2 class="card-title">Complete Registration</h2>
+                    <p class="text-muted">You've been invited to join the platform</p>
+                </div>
+
+                {% if error %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>{{ error }}
+                </div>
+                {% endif %}
+
+                <div class="alert alert-info">
+                    <i class="fas fa-envelope me-2"></i>
+                    <strong>Invitation for:</strong> {{ invited_email }}
+                </div>
+
+                <form method="post" action="/register">
+                    {% if token %}
+                    <input type="hidden" name="token" value="{{ token }}">
+                    {% endif %}
+                    
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email</label>
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <i class="fas fa-envelope"></i>
+                            </span>
+                            <input type="email" class="form-control" id="email" name="email" 
+                                   value="{{ invited_email }}" readonly required>
+                        </div>
+                        <div class="form-text">This email was specified in your invitation</div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="password" class="form-label">Password</label>
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <i class="fas fa-lock"></i>
+                            </span>
+                            <input type="password" class="form-control" id="password" name="password" required minlength="6">
+                        </div>
+                        <div class="form-text">Password must be at least 6 characters long</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100 mb-3">
+                        <i class="fas fa-user-plus me-2"></i>Create Account
+                    </button>
+                </form>
+
+                <div class="text-center">
+                    <p class="text-muted">
+                        Complete your registration to access the platform
+                    </p>
+                    <p class="text-muted">
+                        <a href="/login" class="text-primary text-decoration-none">
+                            <i class="fas fa-arrow-left me-1"></i>Back to Login
+                        </a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

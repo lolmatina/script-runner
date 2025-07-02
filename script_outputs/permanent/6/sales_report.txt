@@ -1,0 +1,26 @@
+SALES DATA ANALYSIS REPORT
+==================================================
+
+Generated on: 2025-07-02 23:52:03
+
+DATASET INFORMATION:
+• Period: 2025-06-03 to 2025-07-02
+• Total days: 30 days
+• Data points: 30 records
+
+SALES STATISTICS:
+• Total sales: $28,057.82
+• Average daily sales: $935.26
+• Maximum daily sales: $1,318.59
+• Minimum daily sales: $448.38
+• Standard deviation: $233.88
+
+WEEKLY BREAKDOWN:
+• Week 23: $6,480.90
+• Week 24: $6,538.79
+• Week 25: $6,393.29
+• Week 26: $6,563.87
+• Week 27: $2,080.97
+
+==================================================
+End of Report

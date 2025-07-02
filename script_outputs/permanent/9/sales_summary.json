@@ -1,0 +1,22 @@
+{
+  "analysis_date": "2025-07-02 23:59:04",
+  "data_period": {
+    "start_date": "2025-06-03",
+    "end_date": "2025-07-02",
+    "total_days": 30
+  },
+  "sales_statistics": {
+    "total_sales": 29934.223765459148,
+    "average_daily_sales": 997.8074588486382,
+    "maximum_daily_sales": 1448.9849956242647,
+    "minimum_daily_sales": 763.533886412978,
+    "standard_deviation": 177.61980878690528
+  },
+  "weekly_breakdown": {
+    "week_23": 6178.895971210977,
+    "week_24": 7221.40191506519,
+    "week_25": 6859.762881709762,
+    "week_26": 6731.930945796377,
+    "week_27": 2942.2320516768377
+  }
+}

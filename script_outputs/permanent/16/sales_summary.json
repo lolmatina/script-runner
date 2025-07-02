@@ -1,0 +1,12 @@
+{
+  "total_sales": 36999.310000000005,
+  "avg_sales": 1233.3103333333336,
+  "median_sales": 1248.72,
+  "std_sales": 306.9051882740666,
+  "min_sales": 710.8,
+  "max_sales": 1889.36,
+  "total_customers": 3086,
+  "avg_customers": 102.86666666666666,
+  "avg_order_value": 12.847666666666667,
+  "total_days": 30,
+  "best_day": 
