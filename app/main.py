@@ -76,6 +76,11 @@ async def login(
             {"request": request, "error": "Invalid email or password"}
         )
     
+    # Update last login time
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.commit()
+    
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
@@ -532,6 +537,142 @@ async def logout():
     response = RedirectResponse(url="/", status_code=302)
     response.delete_cookie(key="access_token")
     return response
+
+@app.post("/admin/edit-script")
+async def edit_script(
+    request: Request,
+    script_id: int = Form(...),
+    name: str = Form(...),
+    description: str = Form(""),
+    requirements: str = Form(""),
+    output_types: str = Form("both"),
+    db: Session = Depends(get_db)
+):
+    if not check_admin_auth(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get the script
+    script = db.query(Script).filter(Script.id == script_id).first()
+    if not script:
+        return RedirectResponse(url="/admin?error=Script not found", status_code=302)
+    
+    # Update script metadata
+    script.name = name
+    script.description = description.strip() if description.strip() else None
+    script.requirements = requirements.strip() if requirements.strip() else None
+    script.output_types = output_types
+    
+    db.commit()
+    
+    return RedirectResponse(url=f"/admin?success=Script '{name}' updated successfully", status_code=302)
+
+@app.post("/admin/delete-script")
+async def delete_script(
+    request: Request,
+    script_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    if not check_admin_auth(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get the script
+    script = db.query(Script).filter(Script.id == script_id).first()
+    if not script:
+        return RedirectResponse(url="/admin?error=Script not found", status_code=302)
+    
+    # Check if script has any executions
+    execution_count = db.query(ScriptExecution).filter(ScriptExecution.script_id == script_id).count()
+    
+    script_name = script.name
+    script_filename = script.filename
+    
+    # Delete the script from database
+    db.delete(script)
+    db.commit()
+    
+    # Try to delete the physical file
+    try:
+        import os
+        file_path = f"app/scripts/{script_filename}"
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        print(f"Warning: Could not delete script file {script_filename}: {e}")
+    
+    success_msg = f"Script '{script_name}' deleted successfully"
+    if execution_count > 0:
+        success_msg += f" (had {execution_count} previous executions)"
+    
+    return RedirectResponse(url=f"/admin?success={success_msg}", status_code=302)
+
+@app.post("/admin/reset-password")
+async def reset_user_password(
+    request: Request,
+    user_id: int = Form(...),
+    new_password: str = Form(...),
+    send_notification: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    if not check_admin_auth(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get the user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return RedirectResponse(url="/admin?error=User not found", status_code=302)
+    
+    # Hash the new password
+    from .auth import get_password_hash
+    hashed_password = get_password_hash(new_password)
+    
+    # Update user password
+    user.hashed_password = hashed_password
+    db.commit()
+    
+    # Send email notification if requested
+    notification_status = ""
+    if send_notification:
+        try:
+            success, message = email_service.send_password_reset_notification(
+                user.email, 
+                new_password  # In production, don't send the actual password
+            )
+            if success:
+                notification_status = " (user notified via email)"
+            else:
+                notification_status = f" (email notification failed: {message})"
+        except Exception as e:
+            notification_status = f" (email notification failed: {str(e)})"
+    
+    return RedirectResponse(
+        url=f"/admin?success=Password reset for {user.email}{notification_status}", 
+        status_code=302
+    )
+
+@app.post("/admin/toggle-user-status")
+async def toggle_user_status(
+    request: Request,
+    user_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+    if not check_admin_auth(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get the user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return RedirectResponse(url="/admin?error=User not found", status_code=302)
+    
+    # Toggle status
+    user.is_active = not user.is_active
+    status_text = "activated" if user.is_active else "deactivated"
+    
+    db.commit()
+    
+    return RedirectResponse(
+        url=f"/admin?success=User {user.email} has been {status_text}", 
+        status_code=302
+    )
 
 @app.get("/admin/logout")
 async def admin_logout():

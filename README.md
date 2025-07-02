@@ -134,7 +134,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### **5. Access the Application**
 - **🌐 Main Application**: http://localhost:8000
-- **⚙️ Admin Panel**: http://localhost:8000/admin (password: `admin123`)
+- **⚙️ Admin Panel**: http://localhost:8000/admin (password: `admin123`) - Full user & script management
 - **📊 User Dashboard**: http://localhost:8000/dashboard
 
 ### **6. Try It Out!**
@@ -218,12 +218,31 @@ sanzhar/
    - Add name, description, and expected output type
    - System automatically detects imports and dependencies
 
-2. **Package Requirements**: 
+2. **📝 Edit Scripts**: 
+   - **Edit metadata**: Update name, description, and requirements
+   - **Package management**: Modify required packages and versions
+   - **Output type settings**: Change expected output configuration
+   - **Bulk operations**: Efficient management of multiple scripts
+
+3. **🗑️ Delete Scripts**: 
+   - **Safe deletion**: Confirmation dialog prevents accidental removal
+   - **File cleanup**: Automatically removes script files from disk
+   - **History tracking**: Shows execution count before deletion
+   - **Database cleanup**: Maintains referential integrity
+
+4. **📊 Enhanced Listing**:
+   - **Detailed table**: View all script metadata in organized columns
+   - **Action buttons**: Quick edit and delete options for each script
+   - **Requirements display**: See package dependencies at a glance
+   - **Output type badges**: Visual indicators for script output types
+
+5. **Package Requirements**: 
    - Specify required packages: `pandas>=1.0, matplotlib, numpy`
    - Auto-detection suggests missing packages
    - Version specifiers supported
+   - Edit requirements post-upload
 
-3. **Output Type Configuration**:
+6. **Output Type Configuration**:
    - **📝 Text Only**: Scripts that only output to stdout/stderr
    - **📁 Files Only**: Scripts that generate files (PDFs, images, data)
    - **📁📝 Both**: Scripts with text output AND file generation
@@ -231,13 +250,18 @@ sanzhar/
 #### **👥 User Management:**
 - **📧 Email Invitations**: Automatic invitation emails with registration links
 - **🔗 Manual Invitations**: Copy invitation links for manual distribution  
-- **📊 User Monitoring**: View registered users and execution history
+- **📊 User Monitoring**: View registered users with login history and status
 - **🔒 Access Control**: Manage user permissions and invitations
+- **🔑 Password Reset**: Admin can reset user passwords with email notification
+- **👤 User Status**: Activate/deactivate user accounts as needed
+- **📋 Enhanced User Table**: Shows last login, registration date, and status
+- **📧 Security Notifications**: Automatic email alerts for password changes
 
 #### **⚙️ System Configuration:**
 - **📧 Email Status**: Check Gmail SMTP configuration and test connections
 - **📊 Storage Monitoring**: View disk usage and file statistics
 - **🧹 Cleanup Settings**: Configure automatic file cleanup behavior
+- **🚪 Admin Logout**: Secure logout with session cleanup and redirect
 
 ### 👤 **User Dashboard** (`/dashboard`)
 
@@ -847,7 +871,55 @@ chown -R $USER:$USER script_outputs/
 ```bash
 ❌ Problem: Generated files not accessible
 ✅ Solutions:
-   1. Check script_outputs/ directory permissions
+   1. Check if files were cleaned up after email (see cleanup settings)
+   2. Verify execution ID is correct
+   3. Check script_outputs/permanent/{execution_id}/ directory
+   4. Ensure file permissions are correct
+```
+
+### **👥 User Management Issues**
+
+#### **"Cannot reset user password"**
+```bash
+❌ Problem: Password reset fails in admin panel
+✅ Solutions:
+   1. Verify admin authentication is valid
+   2. Check user exists in database
+   3. Ensure new password meets minimum requirements (6+ characters)
+   4. Check database write permissions
+   5. Verify email configuration for notifications
+```
+
+#### **"Email notification not sent"**
+```bash
+❌ Problem: User doesn't receive password reset email
+✅ Solutions:
+   1. Check Gmail SMTP configuration in .env file
+   2. Verify recipient email address is correct
+   3. Check spam/junk folder
+   4. Test email connection: Admin Panel → Email Configuration
+   5. Ensure GMAIL_APP_PASSWORD is correct
+```
+
+#### **"User status toggle fails"**
+```bash
+❌ Problem: Cannot activate/deactivate users
+✅ Solutions:
+   1. Verify admin authentication is valid
+   2. Check user exists in database  
+   3. Ensure database write permissions
+   4. Try refreshing the admin panel page
+   5. Check browser console for JavaScript errors
+```
+
+#### **"Last login shows 'Never'"**
+```bash
+❌ Problem: Users show 'Never' for last login despite recent activity
+✅ Solutions:
+   1. Database migration needed - run migration script if upgrading
+   2. Users need to log in again after migration to update timestamp
+   3. Check if last_login column exists in users table
+   4. Verify login process is updating the timestamp correctly
    2. Verify file paths in script
    3. Check if cleanup removed files
    4. Look in correct execution directory

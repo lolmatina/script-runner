@@ -331,6 +331,105 @@ class EmailService:
             print(error_msg)
             return False, error_msg
 
+    def send_password_reset_notification(self, to_email: str, new_password: str) -> tuple[bool, str]:
+        """
+        Send password reset notification to user
+        Returns: (success: bool, message: str)
+        """
+        if not self.is_configured:
+            return False, "Email service not configured"
+        
+        try:
+            # Email subject
+            subject = f"🔑 Password Reset - {self.from_name}"
+            
+            # Email body (HTML)
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                    .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                    .header {{ background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+                    .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }}
+                    .warning {{ background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107; }}
+                    .password-box {{ background: #f8f9fa; border: 2px solid #28a745; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }}
+                    .security-tips {{ background: #e8f4fd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff; }}
+                    .footer {{ text-align: center; margin-top: 30px; color: #666; font-size: 14px; }}
+                    .button {{ display: inline-block; background: linear-gradient(45deg, #28a745, #20c997); color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>🔑 Password Reset</h1>
+                        <p>Your password has been reset by an administrator</p>
+                    </div>
+                    
+                    <div class="content">
+                        <h2>Hello,</h2>
+                        <p>Your administrator has reset your password for <strong>{self.from_name}</strong>. This is an important security notification.</p>
+                        
+                        <div class="warning">
+                            <strong>⚠️ Security Alert:</strong> Your password was reset by a system administrator. If you did not request this change, please contact your administrator immediately.
+                        </div>
+                        
+                        <div class="password-box">
+                            <h3>🔐 Your New Password:</h3>
+                            <code style="font-size: 18px; font-weight: bold; color: #28a745;">{new_password}</code>
+                            <p style="margin-top: 15px;"><small>Copy this password to log in to your account</small></p>
+                        </div>
+                        
+                        <div class="security-tips">
+                            <h4>🛡️ Security Recommendations:</h4>
+                            <ul>
+                                <li><strong>Change this password</strong> immediately after logging in</li>
+                                <li><strong>Use a strong, unique password</strong> that you haven't used elsewhere</li>
+                                <li><strong>Consider using a password manager</strong> to generate and store secure passwords</li>
+                                <li><strong>Don't share your password</strong> with anyone</li>
+                            </ul>
+                        </div>
+                        
+                        <p style="text-align: center; margin: 30px 0;">
+                            <a href="{self.base_url}/login" class="button">🔐 Login Now</a>
+                        </p>
+                        
+                        <h3>📋 Account Details:</h3>
+                        <ul>
+                            <li><strong>Email:</strong> {to_email}</li>
+                            <li><strong>Reset Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</li>
+                            <li><strong>Reset By:</strong> System Administrator</li>
+                        </ul>
+                        
+                        <p><strong>Questions or concerns?</strong> Contact your system administrator for assistance.</p>
+                    </div>
+                    
+                    <div class="footer">
+                        <p>Login URL: <a href="{self.base_url}/login">{self.base_url}/login</a></p>
+                        <hr>
+                        <p>This notification was sent by {self.from_name} | Secure Password Management</p>
+                        <p style="font-size: 12px; color: #999;">This is an automated security notification</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Send email
+            self.yag.send(
+                to=to_email,
+                subject=subject,
+                contents=html_body
+            )
+            
+            return True, f"✅ Password reset notification sent to {to_email}"
+            
+        except Exception as e:
+            error_msg = f"❌ Failed to send password reset notification to {to_email}: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+
     def test_connection(self) -> tuple[bool, str]:
         """Test Gmail SMTP connection"""
         if not self.is_configured:
