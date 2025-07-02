@@ -364,12 +364,15 @@ async def run_script(
     
     # Clean up files after successful email sending (if enabled)
     cleanup_status = ""
-    if email_success and file_manager.cleanup_after_email and output.get("output_files"):
-        cleanup_success = file_manager.cleanup_execution_files(execution.id)
-        if cleanup_success:
-            cleanup_status = " (files cleaned up after email)"
+    if email_success and output.get("output_files"):
+        if file_manager.cleanup_after_email:
+            cleanup_success = file_manager.cleanup_execution_files(execution.id)
+            if cleanup_success:
+                cleanup_status = " (files cleaned up to save space)"
+            else:
+                cleanup_status = " (cleanup failed - files retained)"
         else:
-            cleanup_status = " (cleanup failed - files retained)"
+            cleanup_status = " (files preserved for download)"
     
     # Add email status to output for display
     if email_success:

@@ -17,8 +17,8 @@ class FileOutputManager:
         
         # Configure cleanup behavior from environment variable or parameter
         if cleanup_after_email is None:
-            # Check environment variable, default to True if not set
-            cleanup_after_email = os.getenv("CLEANUP_FILES_AFTER_EMAIL", "true").lower() in ("true", "1", "yes")
+            # Check environment variable, default to False if not set (changed for better UX)
+            cleanup_after_email = os.getenv("CLEANUP_FILES_AFTER_EMAIL", "false").lower() in ("true", "1", "yes")
         
         self.cleanup_after_email = cleanup_after_email
         

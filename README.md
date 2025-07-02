@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> 🎯 **What's New**: Added automatic file cleanup after email delivery! Files are now automatically cleaned up after successful email sending to save disk space while maintaining safety and user control.
+> 🎯 **What's New**: Added optional file cleanup after email delivery! Files are preserved by default for web download, with optional cleanup available to save disk space. Better user experience while maintaining flexibility.
 
 ## 🌟 Why Choose This Platform?
 
@@ -654,23 +654,29 @@ DEBUG=false
 
 #### **Configuration Options**
 ```env
-# Enable automatic cleanup (default)
+# Enable automatic cleanup
 CLEANUP_FILES_AFTER_EMAIL=true
 
-# Disable cleanup - keep all files
+# Disable cleanup - keep all files (default)
 CLEANUP_FILES_AFTER_EMAIL=false
 
-# If not set, defaults to true
+# If not set, defaults to false (files preserved)
 ```
 
 #### **Benefits & Considerations**
-**✅ Benefits:**
+**✅ Benefits (when enabled):**
 - Saves disk space and prevents unlimited file accumulation
 - Maintains user privacy (files don't linger indefinitely)
 - Reduces server storage costs for high-volume usage
 - Files are safely delivered via email before cleanup
 
-**⚠️ Considerations:**
+**🔒 Default Behavior (cleanup disabled):**
+- Files remain available for web download after email sending
+- Users can access files both from email attachments and web interface
+- Better user experience with persistent file access
+- Manual cleanup can be performed when needed
+
+**⚠️ Considerations (when cleanup enabled):**
 - Files are permanently deleted after successful email
 - Users should save important files from email attachments
 - Can be disabled if permanent file retention is needed
