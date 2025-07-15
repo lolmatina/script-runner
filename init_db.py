@@ -5,8 +5,11 @@ Adds sample scripts to the database for testing
 """
 
 import sys
-from app.database import SessionLocal, create_tables, Script
+from app.database import SessionLocal, create_tables, Script, BetQuery, ScriptExecution, engine
 from datetime import datetime
+import sqlite3
+import os
+import json
 
 def init_database(force_reset=False):
     # Create tables
@@ -166,6 +169,15 @@ def show_help():
     print("   python init_db.py --force")
     print("   python init_db.py --add")
     print()
+
+def init_db():
+    """Initialize database with new schema"""
+    from app.database import Base
+    
+    # Drop and recreate all tables
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    print("Database schema updated successfully")
 
 if __name__ == "__main__":
     # Parse command line arguments

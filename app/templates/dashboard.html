@@ -3,6 +3,43 @@
 {% block title %}Dashboard - Script Runner App{% endblock %}
 
 {% block content %}
+<style>
+.nav-tabs .nav-link.active {
+    color: #000 !important;
+    font-weight: 500;
+}
+.nav-tabs .nav-link {
+    color: #6c757d;
+}
+
+/* Toast styling */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+}
+
+.toast {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    margin-bottom: 10px;
+    min-width: 300px;
+}
+
+.toast.success {
+    border-left: 4px solid #28a745;
+}
+
+.toast.error {
+    border-left: 4px solid #dc3545;
+}
+</style>
+
+<!-- Toast container -->
+<div class="toast-container"></div>
+
 <div class="row">
     <div class="col-12">
         <div class="card mb-4">
@@ -10,293 +47,436 @@
                 <h1 class="card-title">
                     <i class="fas fa-tachometer-alt me-2"></i>Dashboard
                 </h1>
-                <p class="text-muted">Welcome, {{ user.email }}! Select a script to run below.</p>
+                <p class="text-muted">Welcome, {{ user.email }}!</p>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">
-                    <i class="fas fa-play me-2"></i>Run Script
-                </h5>
-            </div>
-            <div class="card-body">
-                {% if scripts %}
-                <form method="post" action="/run-script">
-                    <div class="mb-3">
-                        <label for="script_id" class="form-label">Select Script</label>
-                        <select class="form-select" id="script_id" name="script_id" required onchange="updateDescription()">
-                            <option value="">Choose a script...</option>
-                            {% for script in scripts %}
-                            <option value="{{ script.id }}" data-description="{{ script.description or 'No description available' }}">
-                                {{ script.name }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Script Description</label>
-                        <div id="script-description" class="form-text text-muted">
-                            Select a script to see its description
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="arguments" class="form-label">Arguments</label>
-                        <textarea class="form-control" id="arguments" name="arguments" rows="3" 
-                                  placeholder="Enter arguments (one per line or as JSON array)"></textarea>
-                        <div class="form-text">
-                            Examples: <br>
-                            • Simple: hello world<br>
-                            • Multiple: ["arg1", "arg2", "arg3"]<br>
-                            • JSON: {"key": "value"}
-                        </div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="auto_install" name="auto_install" value="true">
-                            <label class="form-check-label" for="auto_install">
-                                <i class="fas fa-download me-1"></i> Auto-install missing packages
-                            </label>
-                            <div class="form-text">
-                                ⚠️ This will automatically install any missing Python packages required by the script
+<ul class="nav nav-tabs mb-4" id="dashboardTabs" role="tablist">
+    <li class="nav-item " role="presentation">
+        <button class="nav-link active" id="bet-query-tab" data-bs-toggle="tab" data-bs-target="#bet-query" type="button" role="tab" aria-controls="bet-query" aria-selected="true">
+            <i class="fas fa-search me-2"></i>Bet Query
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="script-runner-tab" data-bs-toggle="tab" data-bs-target="#script-runner" type="button" role="tab" aria-controls="script-runner" aria-selected="false">
+            <i class="fas fa-code me-2"></i>Script Runner
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="dashboardTabsContent">
+    <!-- Bet Query Tab -->
+    <div class="tab-pane fade show active" id="bet-query" role="tabpanel" aria-labelledby="bet-query-tab">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-search me-2"></i>Query Bets
+                        </h5>
+                        <form action="/run-bet-query" method="post">
+                            <div class="mb-3">
+                                <label for="user_id" class="form-label">User ID</label>
+                                <input type="number" class="form-control" id="user_id" name="user_id" required min="1">
+                                <div class="form-text">Enter a valid user ID (must be a positive number)</div>
                             </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-play me-2"></i>Run Query
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-history me-2"></i>Query History
+                        </h5>
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>User ID</th>
+                                        <th>Status</th>
+                                        <th>Created</th>
+                                        <th>Duration</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for query in bet_queries %}
+                                    <tr>
+                                        <td>{{ query.target_user_id }}</td>
+                                        <td>
+                                            {% if query.status == 'completed' %}
+                                            <span class="badge bg-success">Completed</span>
+                                            {% elif query.status == 'failed' %}
+                                            <span class="badge bg-danger" title="{{ query.error_message }}">Failed</span>
+                                            {% elif query.status == 'processing' %}
+                                            <span class="badge bg-info">Processing</span>
+                                            {% else %}
+                                            <span class="badge bg-warning">Pending</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ query.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                        <td>
+                                            {% if query.completed_at %}
+                                                {% set duration = (query.completed_at - query.created_at).total_seconds() %}
+                                                {% if duration < 60 %}
+                                                    {{ "%.1f"|format(duration) }}s
+                                                {% elif duration < 3600 %}
+                                                    {{ "%d"|format(duration // 60) }}m {{ "%d"|format(duration % 60) }}s
+                                                {% else %}
+                                                    {{ "%d"|format(duration // 3600) }}h {{ "%d"|format((duration % 3600) // 60) }}m
+                                                {% endif %}
+                                            {% elif query.status in ['pending', 'processing'] %}
+                                                {% set duration = (now - query.created_at).total_seconds() %}
+                                                {% if duration < 60 %}
+                                                    {{ "%.1f"|format(duration) }}s...
+                                                {% elif duration < 3600 %}
+                                                    {{ "%d"|format(duration // 60) }}m {{ "%d"|format(duration % 60) }}s...
+                                                {% else %}
+                                                    {{ "%d"|format(duration // 3600) }}h {{ "%d"|format((duration % 3600) // 60) }}m...
+                                                {% endif %}
+                                            {% else %}
+                                            -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if query.status == 'completed' and query.execution_id and query.execution_id > 0 and query.output_filename %}
+                                            <a href="/download/{{ query.execution_id }}/{{ query.output_filename }}" 
+                                               class="btn btn-sm btn-outline-primary" 
+                                               title="Download Results">
+                                                <i class="fas fa-download"></i>
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-play me-2"></i>Run Script
-                    </button>
-                </form>
-                {% else %}
-                <div class="text-center py-4">
-                    <i class="fas fa-file-code fa-3x text-muted mb-3"></i>
-                    <h5 class="text-muted">No Scripts Available</h5>
-                    <p class="text-muted">Ask your administrator to upload some scripts.</p>
                 </div>
-                {% endif %}
             </div>
         </div>
     </div>
-    
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">
-                    <i class="fas fa-terminal me-2"></i>Output
-                </h5>
-            </div>
-            <div class="card-body">
-                {% if output %}
-                <div class="mb-3">
-                    <strong class="text-primary">Executed Script:</strong> {{ executed_script }}
-                </div>
-                
-                {% if email_status %}
-                <div class="alert alert-info">
-                    {{ email_status }}
-                </div>
-                {% endif %}
-                
-                {% if output.package_warnings %}
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i><strong>Package Warnings:</strong>
-                    <ul class="mb-0 mt-2">
-                        {% for warning in output.package_warnings %}
-                        <li>{{ warning }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-                {% endif %}
-                
-                {% if output.package_install_output %}
-                <div class="alert alert-info">
-                    <i class="fas fa-download me-2"></i><strong>Package Installation:</strong>
-                    <pre class="mb-0 mt-2">{{ output.package_install_output }}</pre>
-                </div>
-                {% endif %}
-                
-                {% if output.file_summary and output.file_summary.total > 0 %}
-                <div class="alert alert-success">
-                    <i class="fas fa-file-download me-2"></i><strong>Files Generated:</strong>
-                    {{ output.file_summary.total }} files ({{ output.file_summary.total_size_human }})
-                    
-                    {% if output.file_summary.categories %}
-                    <div class="mt-2">
-                        {% for category, count in output.file_summary.categories.items() %}
-                        <span class="badge bg-info me-1">{{ category.title() }}: {{ count }}</span>
-                        {% endfor %}
+
+    <!-- Script Runner Tab -->
+    <div class="tab-pane fade" id="script-runner" role="tabpanel" aria-labelledby="script-runner-tab">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-play me-2"></i>Run Script
+                        </h5>
                     </div>
-                    {% endif %}
-                </div>
-                
-                <!-- File Output Section -->
-                <div class="mb-3">
-                    <h6><i class="fas fa-folder-open me-2"></i>Generated Files:</h6>
-                    <div class="row g-2">
-                        {% for file in output_files %}
-                        <div class="col-md-6">
-                            <div class="card border-0 bg-light">
-                                <div class="card-body p-3">
-                                    <div class="d-flex align-items-center">
-                                        {% if file.category == 'images' %}
-                                        <i class="fas fa-image text-primary me-2"></i>
-                                        {% elif file.category == 'documents' %}
-                                        <i class="fas fa-file-pdf text-danger me-2"></i>
-                                        {% elif file.category == 'data' %}
-                                        <i class="fas fa-table text-success me-2"></i>
-                                        {% elif file.category == 'charts' %}
-                                        <i class="fas fa-chart-line text-info me-2"></i>
-                                        {% else %}
-                                        <i class="fas fa-file text-secondary me-2"></i>
-                                        {% endif %}
-                                        
-                                        <div class="flex-grow-1">
-                                            <div class="fw-bold">{{ file.name }}</div>
-                                            <small class="text-muted">
-                                                {{ file.size_human }} • {{ file.category.title() }}
-                                            </small>
-                                        </div>
-                                        
-                                        <div class="ms-2">
-                                            <a href="/download/{{ execution_id }}/{{ file.path }}" 
-                                               class="btn btn-sm btn-outline-primary" 
-                                               title="Download {{ file.name }}">
-                                                <i class="fas fa-download"></i>
-                                            </a>
-                                        </div>
+                    <div class="card-body">
+                        {% if scripts %}
+                        <form method="post" action="/run-script">
+                            <div class="mb-3">
+                                <label for="script_id" class="form-label">Select Script</label>
+                                <select class="form-select" id="script_id" name="script_id" required onchange="updateDescription()">
+                                    <option value="">Choose a script...</option>
+                                    {% for script in scripts %}
+                                    <option value="{{ script.id }}" data-description="{{ script.description or 'No description available' }}">
+                                        {{ script.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Script Description</label>
+                                <div id="script-description" class="form-text text-muted">
+                                    Select a script to see its description
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="arguments" class="form-label">Arguments</label>
+                                <textarea class="form-control" id="arguments" name="arguments" rows="3" 
+                                          placeholder="Enter arguments (one per line or as JSON array)"></textarea>
+                                <div class="form-text">
+                                    Examples: <br>
+                                    • Simple: hello world<br>
+                                    • Multiple: ["arg1", "arg2", "arg3"]<br>
+                                    • JSON: {"key": "value"}
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="auto_install" name="auto_install" value="true">
+                                    <label class="form-check-label" for="auto_install">
+                                        <i class="fas fa-download me-1"></i> Auto-install missing packages
+                                    </label>
+                                    <div class="form-text">
+                                        ⚠️ This will automatically install any missing Python packages required by the script
                                     </div>
                                 </div>
                             </div>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-play me-2"></i>Run Script
+                            </button>
+                        </form>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-file-code fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No Scripts Available</h5>
+                            <p class="text-muted">Ask your administrator to upload some scripts.</p>
                         </div>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endif %}
-                
-                {% if output.error %}
-                <div class="alert alert-danger">
-                    <strong>Error:</strong> {{ output.error }}
-                    {% if output.missing_packages %}
-                    <hr>
-                    <strong>Missing packages:</strong> {{ ', '.join(output.missing_packages) }}<br>
-                    <strong>Install command:</strong> <code>{{ output.install_command }}</code>
-                    {% endif %}
-                </div>
-                {% else %}
-                    {% if output.stdout %}
-                    <div class="mb-3">
-                        <label class="form-label">Standard Output:</label>
-                        <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;"><code>{{ output.stdout }}</code></pre>
-                    </div>
-                    {% endif %}
-                    
-                    {% if output.stderr %}
-                    <div class="mb-3">
-                        <label class="form-label">Standard Error:</label>
-                        <pre class="bg-warning p-3 rounded" style="max-height: 200px; overflow-y: auto;"><code>{{ output.stderr }}</code></pre>
-                    </div>
-                    {% endif %}
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Return Code:</label>
-                        <span class="badge {% if output.returncode == 0 %}bg-success{% else %}bg-danger{% endif %}">
-                            {{ output.returncode }}
-                        </span>
-                        {% if execution_id %}
-                        <span class="text-muted ms-2">Execution ID: #{{ execution_id }}</span>
                         {% endif %}
                     </div>
-                {% endif %}
-                {% else %}
-                <div class="text-center py-4">
-                    <i class="fas fa-terminal fa-3x text-muted mb-3"></i>
-                    <h5 class="text-muted">No Output Yet</h5>
-                    <p class="text-muted">Run a script to see its output here.</p>
                 </div>
-                {% endif %}
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-terminal me-2"></i>Output
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if output %}
+                        <div class="mb-3">
+                            <strong class="text-primary">Executed Script:</strong> {{ executed_script }}
+                        </div>
+                        
+                        {% if email_status %}
+                        <div class="alert alert-info">
+                            {{ email_status }}
+                        </div>
+                        {% endif %}
+                        
+                        {% if output.package_warnings %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Package Warnings:</strong>
+                            <ul class="mb-0 mt-2">
+                                {% for warning in output.package_warnings %}
+                                <li>{{ warning }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        
+                        {% if output.package_install_output %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-download me-2"></i><strong>Package Installation:</strong>
+                            <pre class="mb-0 mt-2">{{ output.package_install_output }}</pre>
+                        </div>
+                        {% endif %}
+                        
+                        {% if output.file_summary and output.file_summary.total > 0 %}
+                        <div class="alert alert-success">
+                            <i class="fas fa-file-download me-2"></i><strong>Files Generated:</strong>
+                            {{ output.file_summary.total }} files ({{ output.file_summary.total_size_human }})
+                            
+                            {% if output.file_summary.categories %}
+                            <div class="mt-2">
+                                {% for category, count in output.file_summary.categories.items() %}
+                                <span class="badge bg-info me-1">{{ category.title() }}: {{ count }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- File Output Section -->
+                        <div class="mb-3">
+                            <h6><i class="fas fa-folder-open me-2"></i>Generated Files:</h6>
+                            <div class="row g-2">
+                                {% for file in output_files %}
+                                <div class="col-md-6">
+                                    <div class="card border-0 bg-light">
+                                        <div class="card-body p-3">
+                                            <div class="d-flex align-items-center">
+                                                {% if file.category == 'images' %}
+                                                <i class="fas fa-image text-primary me-2"></i>
+                                                {% elif file.category == 'documents' %}
+                                                <i class="fas fa-file-pdf text-danger me-2"></i>
+                                                {% elif file.category == 'data' %}
+                                                <i class="fas fa-table text-success me-2"></i>
+                                                {% elif file.category == 'charts' %}
+                                                <i class="fas fa-chart-line text-info me-2"></i>
+                                                {% else %}
+                                                <i class="fas fa-file text-secondary me-2"></i>
+                                                {% endif %}
+                                                
+                                                <div class="flex-grow-1">
+                                                    <div class="fw-bold">{{ file.name }}</div>
+                                                    <small class="text-muted">
+                                                        {{ file.size_human }} • {{ file.category.title() }}
+                                                    </small>
+                                                </div>
+                                                
+                                                <div class="ms-2">
+                                                    <a href="/download/{{ execution_id }}/{{ file.path }}" 
+                                                       class="btn btn-sm btn-outline-primary" 
+                                                       title="Download {{ file.name }}">
+                                                        <i class="fas fa-download"></i>
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if output.error %}
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> {{ output.error }}
+                            {% if output.missing_packages %}
+                            <hr>
+                            <strong>Missing packages:</strong> {{ ', '.join(output.missing_packages) }}<br>
+                            <strong>Install command:</strong> <code>{{ output.install_command }}</code>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                            {% if output.stdout %}
+                            <div class="mb-3">
+                                <label class="form-label">Standard Output:</label>
+                                <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow-y: auto;"><code>{{ output.stdout }}</code></pre>
+                            </div>
+                            {% endif %}
+                            
+                            {% if output.stderr %}
+                            <div class="mb-3">
+                                <label class="form-label">Standard Error:</label>
+                                <pre class="bg-warning p-3 rounded" style="max-height: 200px; overflow-y: auto;"><code>{{ output.stderr }}</code></pre>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Return Code:</label>
+                                <span class="badge {% if output.returncode == 0 %}bg-success{% else %}bg-danger{% endif %}">
+                                    {{ output.returncode }}
+                                </span>
+                                {% if execution_id %}
+                                <span class="text-muted ms-2">Execution ID: #{{ execution_id }}</span>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-terminal fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No Output Yet</h5>
+                            <p class="text-muted">Run a script to see its output here.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
+
+        {% if scripts %}
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-list me-2"></i>Available Scripts
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Filename</th>
+                                        <th>Description</th>
+                                        <th>Output Type</th>
+                                        <th>Requirements</th>
+                                        <th>Created</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for script in scripts %}
+                                    <tr>
+                                        <td>{{ script.name }}</td>
+                                        <td><code>{{ script.filename }}</code></td>
+                                        <td>{{ script.description or 'No description' }}</td>
+                                        <td>{{ script.output_types or 'both' }}</td>
+                                        <td>
+                                            {% if script.requirements %}
+                                            <code>{{ script.requirements }}</code>
+                                            {% else %}
+                                            None
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ script.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 
-{% if scripts %}
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">
-                    <i class="fas fa-list me-2"></i>Available Scripts
-                </h5>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Filename</th>
-                                <th>Description</th>
-                                <th>Output Type</th>
-                                <th>Requirements</th>
-                                <th>Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for script in scripts %}
-                            <tr>
-                                <td><strong>{{ script.name }}</strong></td>
-                                <td><code>{{ script.filename }}</code></td>
-                                <td>{{ script.description or "No description" }}</td>
-                                <td>
-                                    {% if script.output_types == 'files' %}
-                                    <span class="badge bg-primary">📁 Files</span>
-                                    {% elif script.output_types == 'text' %}
-                                    <span class="badge bg-secondary">📝 Text</span>
-                                    {% else %}
-                                    <span class="badge bg-success">📁📝 Both</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if script.requirements %}
-                                    <span class="badge bg-info">{{ script.requirements }}</span>
-                                    {% else %}
-                                    <span class="text-muted">None</span>
-                                    {% endif %}
-                                </td>
-                                <td>{{ script.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
-{% endblock %}
-
-{% block scripts %}
 <script>
 function updateDescription() {
     const select = document.getElementById('script_id');
     const description = document.getElementById('script-description');
     const selectedOption = select.options[select.selectedIndex];
-    
-    if (selectedOption.value) {
-        description.textContent = selectedOption.getAttribute('data-description');
-        description.className = 'form-text text-info';
-    } else {
-        description.textContent = 'Select a script to see its description';
-        description.className = 'form-text text-muted';
+    description.textContent = selectedOption.dataset.description;
+}
+
+// Add auto-refresh for bet queries
+function refreshBetQueries() {
+    const betQueryTab = document.getElementById('bet-query');
+    if (betQueryTab && betQueryTab.classList.contains('active')) {
+        // Only refresh if we're on the bet query tab
+        location.reload();
     }
 }
+
+// Show toast message
+function showToast(message, type = 'success') {
+    const container = document.querySelector('.toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type} show`;
+    toast.innerHTML = `
+        <div class="toast-header">
+            <strong class="me-auto">${type === 'success' ? 'Success' : 'Error'}</strong>
+            <button type="button" class="btn-close" onclick="this.parentElement.parentElement.remove()"></button>
+        </div>
+        <div class="toast-body">
+            ${message}
+        </div>
+    `;
+    container.appendChild(toast);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        toast.remove();
+    }, 5000);
+}
+
+// Listen for messages from the server
+document.addEventListener('htmx:afterOnLoad', function(evt) {
+    if (evt.detail.triggerSpec && evt.detail.triggerSpec.showMessage) {
+        const msg = evt.detail.triggerSpec.showMessage;
+        showToast(msg.message, msg.type);
+    }
+});
+
+// Refresh every 10 seconds if there are pending or processing queries
+{% if bet_queries and bet_queries|selectattr('status', 'in', ['pending', 'processing'])|list|length > 0 %}
+    setInterval(refreshBetQueries, 10000);
+{% endif %}
 </script>
 {% endblock %} 

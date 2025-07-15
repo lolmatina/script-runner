@@ -160,9 +160,77 @@ class PackageManager:
         
         return available, missing
     
+    def verify_packages_available(self, packages: List[str]) -> Tuple[bool, List[str], List[str]]:
+        """
+        Verify that packages can actually be imported
+        Returns: (all_available, successful_imports, failed_imports)
+        """
+        successful = []
+        failed = []
+        
+        for pkg in packages:
+            # Extract clean package name (remove version specifiers)
+            clean_pkg = re.split(r'[><=!]', pkg)[0].strip()
+            
+            # Try to import the package
+            try:
+                # Use subprocess to test import in a clean environment
+                test_cmd = [sys.executable, '-c', f'import {clean_pkg}']
+                result = subprocess.run(
+                    test_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode == 0:
+                    successful.append(clean_pkg)
+                else:
+                    # Try alternative import names for common packages
+                    alt_imports = self.get_alternative_import_names(clean_pkg)
+                    import_worked = False
+                    
+                    for alt_name in alt_imports:
+                        try:
+                            alt_cmd = [sys.executable, '-c', f'import {alt_name}']
+                            alt_result = subprocess.run(
+                                alt_cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=10
+                            )
+                            if alt_result.returncode == 0:
+                                successful.append(f"{clean_pkg} (as {alt_name})")
+                                import_worked = True
+                                break
+                        except:
+                            continue
+                    
+                    if not import_worked:
+                        failed.append(clean_pkg)
+                        
+            except Exception as e:
+                failed.append(f"{clean_pkg} (error: {str(e)})")
+        
+        return len(failed) == 0, successful, failed
+    
+    def get_alternative_import_names(self, package_name: str) -> List[str]:
+        """Get alternative import names for packages that have different import names"""
+        alternatives = {
+            'pillow': ['PIL'],
+            'pyyaml': ['yaml'],
+            'beautifulsoup4': ['bs4'],
+            'python-dateutil': ['dateutil'],
+            'msgpack-python': ['msgpack'],
+            'psycopg2-binary': ['psycopg2'],
+            'pymysql': ['pymysql', 'MySQLdb'],  # Can be used as MySQLdb replacement
+        }
+        
+        return alternatives.get(package_name.lower(), [])
+
     def install_packages(self, packages: List[str]) -> Tuple[bool, str]:
         """
-        Install missing packages using pip with intelligent substitutions
+        Install missing packages using pip with intelligent substitutions and verification
         Returns: (success, message)
         """
         if not packages:
@@ -186,8 +254,23 @@ class PackageManager:
                 success_msg += "\n".join(substitution_messages) + "\n"
             
             if result.returncode == 0:
-                success_msg += f"✅ Successfully installed: {', '.join(substituted_packages)}"
-                return True, success_msg
+                success_msg += f"✅ Pip installation completed: {', '.join(substituted_packages)}\n"
+                
+                # Verify packages are actually importable
+                import time
+                time.sleep(2)  # Brief pause to allow installation to complete
+                
+                all_available, successful_imports, failed_imports = self.verify_packages_available(substituted_packages)
+                
+                if all_available:
+                    success_msg += f"✅ Verification successful: All packages can be imported"
+                    return True, success_msg
+                else:
+                    error_msg = f"❌ Package verification failed!\n"
+                    error_msg += f"✅ Successfully imported: {', '.join(successful_imports) if successful_imports else 'None'}\n"
+                    error_msg += f"❌ Failed to import: {', '.join(failed_imports)}\n"
+                    error_msg += f"🔄 Try running the script again, or restart the application"
+                    return False, error_msg
             else:
                 # Try to provide helpful error messages
                 error_msg = result.stderr

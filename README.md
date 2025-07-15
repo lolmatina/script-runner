@@ -57,10 +57,12 @@
 - **Automatic dependency detection** - scans scripts for required packages
 - **Auto-install option** - automatically install missing packages during execution
 - **Smart package substitution** - automatically replaces problematic packages (e.g., `psycopg2` → `psycopg2-binary`)
+- **Package verification** - verifies packages can be imported after installation to prevent timing issues
+- **Installation retry logic** - prevents script execution until packages are properly available
 - **Version specifier support** (e.g., `pandas>=1.0`, `numpy==2.0`)
 - **Manual requirements** - admins can specify additional packages
 - **Installation feedback** - real-time package installation status and warnings
-- **Helpful error messages** - clear guidance when installation fails
+- **Helpful error messages** - clear guidance when installation fails with retry suggestions
 
 ### 🎨 **Enhanced User Interface**
 - **Modern Bootstrap 5 design** with responsive layout and dark/light themes
@@ -853,6 +855,26 @@ MAX_EXECUTIONS_PER_HOUR=20
    2. Check Python environment
    3. Verify package name vs import name
    4. Install in same environment as app
+```
+
+#### **"Script fails on first run but works on retry"**
+```bash
+❌ Problem: Script execution fails on first run with package installation
+✅ What's Fixed:
+   • Added package verification after installation
+   • System now ensures packages are importable before script execution
+   • Enhanced error messages guide users through retry process
+   
+🔧 Automatic Solutions:
+   1. Package installation now includes import verification
+   2. Script execution is blocked until packages are confirmed available
+   3. Better error messages suggest retrying if verification fails
+   
+📋 If Still Having Issues:
+   1. Try running the script again (packages might need environment refresh)
+   2. Restart the application to clear module cache
+   3. Check manual package installation: pip install package_name
+   4. Verify package names in script requirements match actual package names
 ```
 
 ### **📁 File Access Issues**

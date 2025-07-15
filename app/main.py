@@ -1,23 +1,43 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, Form, File, UploadFile, status
+from fastapi import FastAPI, Request, Depends, HTTPException, Form, File, UploadFile, status, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime, UTC
 import subprocess
 import sys
 import os
 import json
 import importlib.util
+import pytz
+import pandas as pd
+import psycopg2
 from typing import Optional
+from dotenv import load_dotenv
+import logging
 
-from .database import get_db, create_tables, User, Script, Invitation, ScriptExecution
+from .database import get_db, create_tables, User, Script, Invitation, ScriptExecution, BetQuery, get_bets_db_connection
 from .auth import (
     verify_password, get_password_hash, create_access_token, 
     verify_token, generate_invitation_token, verify_admin_password,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 from .email_service import email_service
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Load environment variables from parent directory
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+logger.info(f"Looking for .env file at: {dotenv_path}")
+load_dotenv(dotenv_path)
 
 app = FastAPI(title="Script Runner App")
 
@@ -77,8 +97,7 @@ async def login(
         )
     
     # Update last login time
-    from datetime import datetime
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(UTC)
     db.commit()
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -170,10 +189,203 @@ async def register(
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, user: User = Depends(require_auth), db: Session = Depends(get_db)):
     scripts = db.query(Script).all()
+    bet_queries = db.query(BetQuery).filter(BetQuery.user_id == user.id).order_by(BetQuery.created_at.desc()).limit(10).all()
+    # Attach output_filename to each bet_query
+    for query in bet_queries:
+        query.output_filename = None
+        if query.execution_id:
+            execution = db.query(ScriptExecution).filter(ScriptExecution.id == query.execution_id).first()
+            if execution and execution.output_files:
+                try:
+                    files = json.loads(execution.output_files)
+                    if files and isinstance(files, list):
+                        query.output_filename = files[0]
+                except Exception:
+                    pass
     return templates.TemplateResponse(
         "dashboard.html", 
-        {"request": request, "user": user, "scripts": scripts}
+        {
+            "request": request, 
+            "user": user, 
+            "scripts": scripts, 
+            "bet_queries": bet_queries,
+            "now": datetime.now(UTC).replace(tzinfo=None)  # Make timezone-naive for template compatibility
+        }
     )
+
+async def process_bet_query(db: Session, query_id: int):
+    query = db.query(BetQuery).filter(BetQuery.id == query_id).first()
+    if not query:
+        logger.error(f"Query {query_id} not found")
+        return
+    
+    try:
+        logger.info(f"Starting bet query processing for user_id: {query.target_user_id}")
+        
+        # Create execution record
+        execution = ScriptExecution(
+            user_id=query.user_id,
+            script_id=None,  # No script for bet queries
+            arguments=f"target_user_id={query.target_user_id}"
+        )
+        db.add(execution)
+        db.commit()
+        db.refresh(execution)
+        
+        # Store execution ID in query
+        query.execution_id = execution.id
+        
+        # Update status to processing
+        query.status = "processing"
+        db.commit()
+        logger.info("Updated status to processing")
+        
+        # Get current date in GMT+3
+        tz = pytz.timezone('Europe/Istanbul')  # GMT+3
+        current_date = datetime.now(tz)
+        table_name = f"bets_{current_date.strftime('%Y%m')}"
+        logger.info(f"Using table: {table_name}")
+        
+        # Use the dedicated PostgreSQL connection for bets
+        logger.info("Connecting to PostgreSQL database...")
+        conn = get_bets_db_connection()
+        logger.info("Successfully connected to PostgreSQL")
+        
+        sql_query = f"""
+        select *
+        from {table_name}
+        join games on {table_name}.game_id = games.id
+        join vendors on vendors.id = games.vendor_id
+        where {table_name}.user_id = %s
+        and {table_name}.updated_at - {table_name}.created_at >= interval '10 min'
+        """
+        logger.info(f"Executing query for table {table_name} and user_id {query.target_user_id}")
+        
+        print(sql_query)
+        try:
+            df = pd.read_sql_query(sql_query, conn, params=(query.target_user_id,))
+            logger.info(f"Query executed successfully. Retrieved {len(df)} rows")
+        except Exception as sql_error:
+            logger.error(f"SQL Error: {str(sql_error)}")
+            raise
+        
+        # Save output file in permanent storage directory for this execution
+        permanent_dir = os.path.join("script_outputs", "permanent", str(execution.id))
+        os.makedirs(permanent_dir, exist_ok=True)
+        
+        # Update query status
+        query.status = "completed"
+        query.completed_at = datetime.now(UTC)
+
+        # Use completed_at for filename
+        csv_filename = f"bet_query_{query.id}_{query.completed_at.strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = os.path.join(permanent_dir, csv_filename)
+        try:
+            df.to_csv(csv_path, index=False)
+            logger.info(f"CSV file created successfully at {csv_path}")
+        except Exception as csv_error:
+            logger.error(f"CSV Creation Error: {str(csv_error)}")
+            raise
+
+        # Send email
+        user = db.query(User).filter(User.id == query.user_id).first()
+        if user:
+            try:
+                logger.info(f"Sending email to {user.email}")
+                success, message = email_service.send_script_result_email(
+                    to_email=user.email,
+                    script_name=f"Bet Query for User {query.target_user_id}",
+                    arguments="",
+                    output={
+                        'returncode': 0,
+                        'stdout': f"Retrieved {len(df)} rows of data"
+                    },
+                    output_files=[{
+                        'name': csv_filename,
+                        'path': csv_path,
+                        'category': 'data',
+                        'size_human': f"{os.path.getsize(csv_path) / 1024:.1f} KB"
+                    }],
+                    execution_id=execution.id  # Pass execution ID here
+                )
+                if success:
+                    query.email_sent = True
+                    logger.info("Email sent successfully")
+                else:
+                    logger.error(f"Failed to send email: {message}")
+                    raise Exception(message)
+            except Exception as email_error:
+                logger.error(f"Email Error: {str(email_error)}")
+                raise
+
+        # Update execution record
+        execution.output_text = f"Retrieved {len(df)} rows of data"
+        execution.output_files = json.dumps([csv_filename])  # Store just the filename
+        execution.return_code = 0
+
+        db.commit()
+        logger.info("Query processing completed successfully")
+        
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Query processing failed: {error_msg}")
+        query.status = "failed"
+        query.error_message = error_msg
+        query.completed_at = datetime.now(UTC)
+        
+        if 'execution' in locals():
+            execution.error_message = error_msg
+            execution.return_code = -1
+        
+        db.commit()
+        logger.error(f"Updated query status to failed with error: {error_msg}")
+    finally:
+        if 'conn' in locals():
+            conn.close()
+            logger.info("Database connection closed")
+
+@app.post("/run-bet-query")
+async def run_bet_query(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user_id: int = Form(...),
+    user: User = Depends(require_auth),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Create new query record
+        query = BetQuery(
+            user_id=user.id,
+            target_user_id=user_id,
+            status="pending"
+        )
+        db.add(query)
+        db.commit()
+        db.refresh(query)
+        
+        # Add task to background queue
+        background_tasks.add_task(process_bet_query, db, query.id)
+        
+        # Redirect immediately with success message
+        response = RedirectResponse(url="/dashboard", status_code=302)
+        response.headers["HX-Trigger"] = json.dumps({
+            "showMessage": {
+                "message": f"Query for user {user_id} has been submitted and is processing in the background. You can check its status in the history table.",
+                "type": "success"
+            }
+        })
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to submit bet query: {str(e)}")
+        response = RedirectResponse(url="/dashboard", status_code=302)
+        response.headers["HX-Trigger"] = json.dumps({
+            "showMessage": {
+                "message": f"Failed to submit query: {str(e)}",
+                "type": "error"
+            }
+        })
+        return response
 
 @app.post("/run-script")
 async def run_script(
@@ -237,15 +449,17 @@ async def run_script(
     # Handle missing packages
     if dependency_info['missing_packages']:
         if auto_install.lower() == "true":
-            # Attempt to install missing packages
+            # Attempt to install missing packages with verification
             install_success, install_message = package_manager.install_packages(dependency_info['missing_packages'])
             package_install_output = install_message
             
             if not install_success:
+                # Enhanced error handling for package installation failures
                 output = {
-                    "error": f"Missing packages could not be installed: {install_message}",
+                    "error": f"Package installation failed: {install_message}",
                     "missing_packages": dependency_info['missing_packages'],
-                    "install_command": dependency_info['install_command']
+                    "install_command": dependency_info['install_command'],
+                    "suggestion": "Try enabling 'Auto-install missing packages' and run again, or install packages manually."
                 }
                 
                 # Update execution record
@@ -280,17 +494,66 @@ async def run_script(
                         "output_files": []
                     }
                 )
+            else:
+                # Installation succeeded - add success message to package warnings
+                package_warnings.append(f"✅ Package installation: {install_message}")
         else:
             # Warn about missing packages but don't install
             package_warnings.append(f"⚠️ Missing packages: {', '.join(dependency_info['missing_packages'])}")
             package_warnings.append(f"📝 Install command: {dependency_info['install_command']}")
+            package_warnings.append(f"💡 Enable 'Auto-install missing packages' to install automatically")
     
+        # Final verification before script execution (if packages were required)
+    if dependency_info['missing_packages'] and auto_install.lower() == "true":
+        # Re-check that all packages are now available
+        final_dependency_check = package_manager.analyze_script_dependencies(script_path, script.requirements)
+        if final_dependency_check['missing_packages']:
+            output = {
+                "error": f"Script cannot run: Required packages are still missing after installation: {', '.join(final_dependency_check['missing_packages'])}",
+                "missing_packages": final_dependency_check['missing_packages'],
+                "install_command": final_dependency_check['install_command'],
+                "suggestion": "Try running the script again, restart the application, or install packages manually."
+            }
+            
+            # Update execution record
+            execution.error_message = output["error"]
+            execution.return_code = -1
+            db.commit()
+            
+            # Send email with error
+            email_success, email_message = email_service.send_script_result_email(
+                to_email=user.email,
+                script_name=script.name,
+                arguments=arguments,
+                output=output,
+                output_files=[],
+                execution_id=execution.id
+            )
+            
+            email_status = f"📧 Error report sent to {user.email}" if email_success else f"⚠️ Email failed: {email_message}"
+            
+            scripts = db.query(Script).all()
+            return templates.TemplateResponse(
+                "dashboard.html",
+                {
+                    "request": request, 
+                    "user": user, 
+                    "scripts": scripts, 
+                    "output": output,
+                    "executed_script": script.name,
+                    "email_status": email_status,
+                    "dependency_info": final_dependency_check,
+                    "execution_id": execution.id,
+                    "output_files": []
+                }
+            )
+
     # Scan for files before execution
     before_files = set()
     for file_path in workspace_dir.rglob("*"):
         if file_path.is_file():
             before_files.add(file_path)
-    
+
     try:
         # Parse arguments
         args = []
