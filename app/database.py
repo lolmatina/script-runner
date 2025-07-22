@@ -24,7 +24,6 @@ logger.info(f"DB_HOST from env: {os.getenv('DB_HOST')}")
 logger.info(f"DB_DATABASE from env: {os.getenv('DB_DATABASE')}")
 logger.info(f"DB_USER from env: {os.getenv('DB_USER')}")
 logger.info(f"DB_PORT from env: {os.getenv('DB_PORT')}")
-# Don't log DB_PASSWORD for security
 
 # Main SQLite Database URL (for app functionality)
 SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
@@ -35,6 +34,20 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+def execute_pg_query(query: str, params: tuple = None) -> list:
+    """Execute a PostgreSQL query using a new connection"""
+    conn = get_bets_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            try:
+                result = cur.fetchall()
+                return result
+            except psycopg2.ProgrammingError:
+                return None  # For queries that don't return results
+    finally:
+        conn.close()
 
 def get_bets_db_connection():
     """Get a connection to the PostgreSQL database for bets queries"""
@@ -57,7 +70,8 @@ def get_bets_db_connection():
             database=database,
             user=user,
             password=password,
-            port=port
+            port=port,
+            connect_timeout=30
         )
         return conn
     except Exception as e:

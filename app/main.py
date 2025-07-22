@@ -15,8 +15,12 @@ import psycopg2
 from typing import Optional
 from dotenv import load_dotenv
 import logging
+import asyncio
 
-from .database import get_db, create_tables, User, Script, Invitation, ScriptExecution, BetQuery, get_bets_db_connection
+from .database import (
+    get_db, create_tables, User, Script, Invitation, ScriptExecution, BetQuery, 
+    get_bets_db_connection, execute_pg_query
+)
 from .auth import (
     verify_password, get_password_hash, create_access_token, 
     verify_token, generate_invitation_token, verify_admin_password,
@@ -240,92 +244,157 @@ async def process_bet_query(db: Session, query_id: int):
         db.commit()
         logger.info("Updated status to processing")
         
-        # Get current date in GMT+3
-        tz = pytz.timezone('Europe/Istanbul')  # GMT+3
-        current_date = datetime.now(tz)
-        table_name = f"bets_{current_date.strftime('%Y%m')}"
-        logger.info(f"Using table: {table_name}")
-        
-        # Use the dedicated PostgreSQL connection for bets
-        logger.info("Connecting to PostgreSQL database...")
+        # Get user's creation date from PostgreSQL
+        logger.info("Getting user creation date...")
         conn = get_bets_db_connection()
-        logger.info("Successfully connected to PostgreSQL")
-        
-        sql_query = f"""
-        select *
-        from {table_name}
-        join games on {table_name}.game_id = games.id
-        join vendors on vendors.id = games.vendor_id
-        where {table_name}.user_id = %s
-        and {table_name}.updated_at - {table_name}.created_at >= interval '10 min'
-        """
-        logger.info(f"Executing query for table {table_name} and user_id {query.target_user_id}")
-        
-        print(sql_query)
         try:
-            df = pd.read_sql_query(sql_query, conn, params=(query.target_user_id,))
-            logger.info(f"Query executed successfully. Retrieved {len(df)} rows")
-        except Exception as sql_error:
-            logger.error(f"SQL Error: {str(sql_error)}")
-            raise
-        
-        # Save output file in permanent storage directory for this execution
-        permanent_dir = os.path.join("script_outputs", "permanent", str(execution.id))
-        os.makedirs(permanent_dir, exist_ok=True)
-        
-        # Update query status
-        query.status = "completed"
-        query.completed_at = datetime.now(UTC)
-
-        # Use completed_at for filename
-        csv_filename = f"bet_query_{query.id}_{query.completed_at.strftime('%Y%m%d_%H%M%S')}.csv"
-        csv_path = os.path.join(permanent_dir, csv_filename)
-        try:
-            df.to_csv(csv_path, index=False)
-            logger.info(f"CSV file created successfully at {csv_path}")
-        except Exception as csv_error:
-            logger.error(f"CSV Creation Error: {str(csv_error)}")
-            raise
-
-        # Send email
-        user = db.query(User).filter(User.id == query.user_id).first()
-        if user:
-            try:
-                logger.info(f"Sending email to {user.email}")
-                success, message = email_service.send_script_result_email(
-                    to_email=user.email,
-                    script_name=f"Bet Query for User {query.target_user_id}",
-                    arguments="",
-                    output={
-                        'returncode': 0,
-                        'stdout': f"Retrieved {len(df)} rows of data"
-                    },
-                    output_files=[{
-                        'name': csv_filename,
-                        'path': csv_path,
-                        'category': 'data',
-                        'size_human': f"{os.path.getsize(csv_path) / 1024:.1f} KB"
-                    }],
-                    execution_id=execution.id  # Pass execution ID here
-                )
-                if success:
-                    query.email_sent = True
-                    logger.info("Email sent successfully")
+            with conn.cursor() as cur:
+                cur.execute("ROLLBACK")  # Reset any failed transaction
+                cur.execute("SELECT created_at FROM users WHERE id = %s", (query.target_user_id,))
+                result = cur.fetchone()
+                if not result or not result[0]:
+                    raise Exception(f"User {query.target_user_id} not found in PostgreSQL database")
+                user_created_at = result[0]
+            
+            # Generate list of months from user creation until now
+            tz = pytz.timezone('Europe/Istanbul')  # GMT+3
+            current_date = datetime.now(tz)
+            start_date = user_created_at.astimezone(tz)
+            
+            # Initialize empty DataFrame for results
+            all_results = pd.DataFrame()
+            
+            # Query each month sequentially
+            current_month = start_date.replace(day=1)
+            while current_month <= current_date:
+                table_name = f"bets_{current_month.strftime('%Y%m')}"
+                logger.info(f"Querying table: {table_name}")
+                
+                sql_query = f"""
+                select 
+                    {table_name}.id as bet_id,
+                    {table_name}.created_at,
+                    {table_name}.updated_at,
+                    {table_name}.payment_account_id,
+                    {table_name}.game_id,
+                    {table_name}.currency_id,
+                    {table_name}.amount,
+                    {table_name}.win,
+                    {table_name}.amount_usd,
+                    {table_name}.win_usd,
+                    {table_name}.bonus,
+                    {table_name}.external_id,
+                    {table_name}.balance,
+                    {table_name}.user_id,
+                    {table_name}.mobile,
+                    {table_name}.user_bonus_id,
+                    {table_name}.frod_win,
+                    {table_name}.bonus_balance,
+                    games.id as game_id,
+                    games.title as game_name,
+                    games.game_type_id,
+                    games.vendor_id,
+                    vendors.name as vendor_name
+                from {table_name}
+                join games on {table_name}.game_id = games.id
+                join vendors on vendors.id = games.vendor_id
+                where {table_name}.user_id = %s
+                and {table_name}.updated_at - {table_name}.created_at >= interval '10 min'
+                """
+                
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(sql_query, (query.target_user_id,))
+                        result = cur.fetchall()
+                        if result:
+                            # Get column names from cursor description
+                            columns = [desc[0] for desc in cur.description]
+                            month_df = pd.DataFrame(result, columns=columns)
+                            if not month_df.empty:
+                                logger.info(f"Found {len(month_df)} rows in {table_name}")
+                                all_results = pd.concat([all_results, month_df], ignore_index=True)
+                except Exception as e:
+                    # Log error but continue with next month
+                    logger.error(f"Error querying {table_name}: {str(e)}")
+                    with conn.cursor() as cur:
+                        cur.execute("ROLLBACK")  # Ensure transaction is rolled back on error
+                
+                # Move to next month
+                if current_month.month == 12:
+                    current_month = current_month.replace(year=current_month.year + 1, month=1)
                 else:
-                    logger.error(f"Failed to send email: {message}")
-                    raise Exception(message)
-            except Exception as email_error:
-                logger.error(f"Email Error: {str(email_error)}")
+                    current_month = current_month.replace(month=current_month.month + 1)
+            
+            logger.info(f"Query completed. Total rows found: {len(all_results)}")
+            
+            # Sort results by created_at if we have results
+            if not all_results.empty:
+                all_results = all_results.sort_values('created_at', ascending=False)
+            
+            # Save output file in permanent storage directory for this execution
+            permanent_dir = os.path.join("script_outputs", "permanent", str(execution.id))
+            os.makedirs(permanent_dir, exist_ok=True)
+            
+            # Update query status and save results
+            query.status = "completed"
+            query.completed_at = datetime.now(UTC)
+            
+            # Use completed_at for filename
+            csv_filename = f"bet_query_{query.id}_{query.completed_at.strftime('%Y%m%d_%H%M%S')}.csv"
+            csv_path = os.path.join(permanent_dir, csv_filename)
+            
+            try:
+                all_results.to_csv(csv_path, index=False)
+                logger.info(f"CSV file created successfully at {csv_path}")
+            except Exception as csv_error:
+                logger.error(f"CSV Creation Error: {str(csv_error)}")
                 raise
-
-        # Update execution record
-        execution.output_text = f"Retrieved {len(df)} rows of data"
-        execution.output_files = json.dumps([csv_filename])  # Store just the filename
-        execution.return_code = 0
-
-        db.commit()
-        logger.info("Query processing completed successfully")
+            
+            # Send email
+            user = db.query(User).filter(User.id == query.user_id).first()
+            if user:
+                try:
+                    logger.info(f"Sending email to {user.email}")
+                    success, message = email_service.send_script_result_email(
+                        to_email=user.email,
+                        script_name=f"Bet Query for User {query.target_user_id}",
+                        arguments="",
+                        output={
+                            'returncode': 0,
+                            'stdout': f"Retrieved {len(all_results)} rows of data from {start_date.strftime('%Y-%m')} to {current_date.strftime('%Y-%m')}"
+                        },
+                        output_files=[{
+                            'name': csv_filename,
+                            'path': csv_path,
+                            'category': 'data',
+                            'size_human': f"{os.path.getsize(csv_path) / 1024:.1f} KB"
+                        }],
+                        execution_id=execution.id
+                    )
+                    if success:
+                        query.email_sent = True
+                        logger.info("Email sent successfully")
+                    else:
+                        logger.error(f"Failed to send email: {message}")
+                        raise Exception(message)
+                except Exception as email_error:
+                    logger.error(f"Email Error: {str(email_error)}")
+                    raise
+            
+            # Update execution record
+            execution.output_text = f"Retrieved {len(all_results)} rows of data from {start_date.strftime('%Y-%m')} to {current_date.strftime('%Y-%m')}"
+            execution.output_files = json.dumps([csv_filename])  # Store just the filename
+            execution.return_code = 0
+            
+            db.commit()
+            logger.info("Query processing completed successfully")
         
+        except Exception as e:
+            raise e
+        finally:
+            conn.close()
+            logger.info("Database connection closed")
+            
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Query processing failed: {error_msg}")
@@ -339,10 +408,6 @@ async def process_bet_query(db: Session, query_id: int):
         
         db.commit()
         logger.error(f"Updated query status to failed with error: {error_msg}")
-    finally:
-        if 'conn' in locals():
-            conn.close()
-            logger.info("Database connection closed")
 
 @app.post("/run-bet-query")
 async def run_bet_query(
