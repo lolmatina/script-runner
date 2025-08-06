@@ -56,7 +56,12 @@
 <ul class="nav nav-tabs mb-4" id="dashboardTabs" role="tablist">
     <li class="nav-item " role="presentation">
         <button class="nav-link active" id="bet-query-tab" data-bs-toggle="tab" data-bs-target="#bet-query" type="button" role="tab" aria-controls="bet-query" aria-selected="true">
-            <i class="fas fa-search me-2"></i>Bet Query
+            <i class="fas fa-search me-2"></i>Bet Query (Filtered)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="bet-query-no-filter-tab" data-bs-toggle="tab" data-bs-target="#bet-query-no-filter" type="button" role="tab" aria-controls="bet-query-no-filter" aria-selected="false">
+            <i class="fas fa-search-plus me-2"></i>Bet Query (No Filter)
         </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -74,8 +79,12 @@
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">
-                            <i class="fas fa-search me-2"></i>Query Bets
+                            <i class="fas fa-search me-2"></i>Query Bets (Filtered)
                         </h5>
+                        <div class="alert alert-info">
+                            <i class="fas fa-filter me-2"></i>
+                            <strong>Filtered Mode:</strong> This query will only retrieve bets where the time difference between updated_at and created_at is 10 minutes or more.
+                        </div>
                         <form action="/run-bet-query" method="post">
                             <div class="mb-3">
                                 <label for="user_id" class="form-label">User ID</label>
@@ -95,6 +104,112 @@
                         <h5 class="card-title">
                             <i class="fas fa-history me-2"></i>Query History
                         </h5>
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>User ID</th>
+                                        <th>Status</th>
+                                        <th>Created</th>
+                                        <th>Duration</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for query in bet_queries %}
+                                    <tr>
+                                        <td>{{ query.target_user_id }}</td>
+                                        <td>
+                                            {% if query.status == 'completed' %}
+                                            <span class="badge bg-success">Completed</span>
+                                            {% elif query.status == 'failed' %}
+                                            <span class="badge bg-danger" title="{{ query.error_message }}">Failed</span>
+                                            {% elif query.status == 'processing' %}
+                                            <span class="badge bg-info">Processing</span>
+                                            {% else %}
+                                            <span class="badge bg-warning">Pending</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ query.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                        <td>
+                                            {% if query.completed_at %}
+                                                {% set duration = (query.completed_at - query.created_at).total_seconds() %}
+                                                {% if duration < 60 %}
+                                                    {{ "%.1f"|format(duration) }}s
+                                                {% elif duration < 3600 %}
+                                                    {{ "%d"|format(duration // 60) }}m {{ "%d"|format(duration % 60) }}s
+                                                {% else %}
+                                                    {{ "%d"|format(duration // 3600) }}h {{ "%d"|format((duration % 3600) // 60) }}m
+                                                {% endif %}
+                                            {% elif query.status in ['pending', 'processing'] %}
+                                                {% set duration = (now - query.created_at).total_seconds() %}
+                                                {% if duration < 60 %}
+                                                    {{ "%.1f"|format(duration) }}s...
+                                                {% elif duration < 3600 %}
+                                                    {{ "%d"|format(duration // 60) }}m {{ "%d"|format(duration % 60) }}s...
+                                                {% else %}
+                                                    {{ "%d"|format(duration // 3600) }}h {{ "%d"|format((duration % 3600) // 60) }}m...
+                                                {% endif %}
+                                            {% else %}
+                                            -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if query.status == 'completed' and query.execution_id and query.execution_id > 0 and query.output_filename %}
+                                            <a href="/download/{{ query.execution_id }}/{{ query.output_filename }}" 
+                                               class="btn btn-sm btn-outline-primary" 
+                                               title="Download Results">
+                                                <i class="fas fa-download"></i>
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bet Query No Filter Tab -->
+    <div class="tab-pane fade" id="bet-query-no-filter" role="tabpanel" aria-labelledby="bet-query-no-filter-tab">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-search-plus me-2"></i>Query Bets (No Filter)
+                        </h5>
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>No Filter Mode:</strong> This query will retrieve ALL bets for the user without applying the 10-minute time filter.
+                        </div>
+                        <form action="/run-bet-query-no-filter" method="post">
+                            <div class="mb-3">
+                                <label for="user_id_no_filter" class="form-label">User ID</label>
+                                <input type="number" class="form-control" id="user_id_no_filter" name="user_id" required min="1">
+                                <div class="form-text">Enter a valid user ID (must be a positive number)</div>
+                            </div>
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-play me-2"></i>Run Query (No Filter)
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-history me-2"></i>Query History
+                        </h5>
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Note:</strong> This tab shows the same history as the filtered query tab. Both filtered and unfiltered queries are stored together.
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-hover">
                                 <thead>
@@ -438,8 +553,10 @@ function updateDescription() {
 // Add auto-refresh for bet queries
 function refreshBetQueries() {
     const betQueryTab = document.getElementById('bet-query');
-    if (betQueryTab && betQueryTab.classList.contains('active')) {
-        // Only refresh if we're on the bet query tab
+    const betQueryNoFilterTab = document.getElementById('bet-query-no-filter');
+    if ((betQueryTab && betQueryTab.classList.contains('active')) || 
+        (betQueryNoFilterTab && betQueryNoFilterTab.classList.contains('active'))) {
+        // Only refresh if we're on either bet query tab
         location.reload();
     }
 }

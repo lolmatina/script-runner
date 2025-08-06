@@ -217,7 +217,7 @@ async def dashboard(request: Request, user: User = Depends(require_auth), db: Se
         }
     )
 
-async def process_bet_query(db: Session, query_id: int):
+async def process_bet_query(db: Session, query_id: int, filter: bool):
     query = db.query(BetQuery).filter(BetQuery.id == query_id).first()
     if not query:
         logger.error(f"Query {query_id} not found")
@@ -299,7 +299,7 @@ async def process_bet_query(db: Session, query_id: int):
                 join games on {table_name}.game_id = games.id
                 join vendors on vendors.id = games.vendor_id
                 where {table_name}.user_id = %s
-                and {table_name}.updated_at - {table_name}.created_at >= interval '10 min'
+                {f"and {table_name}.updated_at - {table_name}.created_at >= interval '10 min'" if filter else ""}
                 """
                 
                 try:
@@ -429,7 +429,7 @@ async def run_bet_query(
         db.refresh(query)
         
         # Add task to background queue
-        background_tasks.add_task(process_bet_query, db, query.id)
+        background_tasks.add_task(process_bet_query, db, query.id, filter=True)
         
         # Redirect immediately with success message
         response = RedirectResponse(url="/dashboard", status_code=302)
@@ -443,6 +443,49 @@ async def run_bet_query(
         
     except Exception as e:
         logger.error(f"Failed to submit bet query: {str(e)}")
+        response = RedirectResponse(url="/dashboard", status_code=302)
+        response.headers["HX-Trigger"] = json.dumps({
+            "showMessage": {
+                "message": f"Failed to submit query: {str(e)}",
+                "type": "error"
+            }
+        })
+        return response
+
+@app.post("/run-bet-query-no-filter")
+async def run_bet_query_no_filter(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user_id: int = Form(...),
+    user: User = Depends(require_auth),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Create new query record
+        query = BetQuery(
+            user_id=user.id,
+            target_user_id=user_id,
+            status="pending"
+        )
+        db.add(query)
+        db.commit()
+        db.refresh(query)
+        
+        # Add task to background queue with filter=False
+        background_tasks.add_task(process_bet_query, db, query.id, filter=False)
+        
+        # Redirect immediately with success message
+        response = RedirectResponse(url="/dashboard", status_code=302)
+        response.headers["HX-Trigger"] = json.dumps({
+            "showMessage": {
+                "message": f"Query for user {user_id} (no filter) has been submitted and is processing in the background. You can check its status in the history table.",
+                "type": "success"
+            }
+        })
+        return response
+        
+    except Exception as e:
+        logger.error(f"Failed to submit bet query (no filter): {str(e)}")
         response = RedirectResponse(url="/dashboard", status_code=302)
         response.headers["HX-Trigger"] = json.dumps({
             "showMessage": {
